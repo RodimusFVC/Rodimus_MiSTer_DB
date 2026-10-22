@@ -30,6 +30,7 @@ DB_ID = 'RodimusFVC/Rodimus_MiSTer_DB'   # already published: never change
 # repo, category (deploy subfolder without '_')
 CORES = [
     ('InteractiveFiction-Frotz_MiSTer', 'InteractiveFiction'),
+    ('VCR_Robots', 'VCR'),
 ]
 
 LAUNCHER_EXTS = ('.mgl', '.mra')
