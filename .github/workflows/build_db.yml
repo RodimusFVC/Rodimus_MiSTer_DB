@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'   # nightly 09:00 UTC: picks up whatever the core repos pushed that day
 
 permissions:
   contents: write
