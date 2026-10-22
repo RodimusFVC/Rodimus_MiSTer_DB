@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Generate external_files.csv for the Rodimus MiSTer custom database.
 
-Reads each core repo's PUSHED releases/ folder via the GitHub API (not local disk)
-and pins every URL to the current commit SHA, so the hash the DB CI computes always
-matches what users download. Size/MD5 columns are left blank: db_operator.py
-downloads each file in CI and fills them in.
+Reads each core repo's PUSHED releases/ folder via the GitHub API (not local disk),
+pinned to the current commit SHA.
+  - latest rbf  -> external_files.csv row (size/MD5 left blank; the DB CI fills them in)
+  - .mgl/.mra   -> copied unchanged into this repo (the DB build reads them from the checkout)
 
 Layout on the MiSTer:
     _RodimusCores/_<Category>/<launchers, subfolders>
-    _RodimusCores/_<Category>/cores/<Core>_<date>.rbf      (MGL-launched cores)
-    _RodimusCores/cores/<Core>_<date>.rbf                  (MRA-launched cores: Main_MiSTer
-                                                            looks for the rbf in <first _Folder>/cores)
+    _RodimusCores/_<Category>/cores/<rbf>
 
-Usage: python3 .github/gen_external_files.py   (writes external_files.csv in the repo root)
+Usage: python3 .github/gen_external_files.py
 """
 import csv
 import json
@@ -24,10 +22,11 @@ import urllib.request
 
 OWNER = 'RodimusFVC'
 ROOT = '_RodimusCores'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# repo, category (deploy subfolder without '_'), launcher type ('mgl' or 'mra')
+# repo, category (deploy subfolder without '_')
 CORES = [
-    ('InteractiveFiction-Frotz_MiSTer', 'InteractiveFiction', 'mgl'),
+    ('InteractiveFiction-Frotz_MiSTer', 'InteractiveFiction'),
 ]
 
 LAUNCHER_EXTS = ('.mgl', '.mra')
@@ -47,7 +46,7 @@ def api(path):
         return json.load(r)
 
 
-def rows_for_core(repo, category, launcher):
+def rows_for_core(repo, category):
     full = f'{OWNER}/{repo}'
     branch = api(f'/repos/{full}')['default_branch']
     sha = api(f'/repos/{full}/commits/{branch}')['sha']
@@ -61,34 +60,46 @@ def rows_for_core(repo, category, launcher):
     def url(path):
         return f'https://raw.githubusercontent.com/{full}/{sha}/{urllib.parse.quote(path)}'
 
-    rows = []
-
-    # latest rbf only, category prefix stripped (InteractiveFiction-Frotz_20261022.rbf -> Frotz_20261022.rbf)
+    # latest rbf only, filename unchanged -> external_files.csv row
     rbfs = []
     for p in files:
         m = RBF_RE.match(p[len('releases/'):])
         if m:
-            rbfs.append((m.group('date'), m.group('core'), p))
+            rbfs.append((m.group('date'), p))
     if not rbfs:
         sys.exit(f'{full}: no <Core>_yyyymmdd.rbf in releases/')
-    date, core, rbf_path = max(rbfs)
-    cores_dir = f'{ROOT}/_{category}/cores' if launcher == 'mgl' else f'{ROOT}/cores'
-    rows.append([f'{cores_dir}/{core}_{date}.rbf', url(rbf_path), '', '', ''])
+    _, rbf_path = max(rbfs)
+    rows = [[f'{ROOT}/_{category}/cores/{os.path.basename(rbf_path)}', url(rbf_path), '', '', '']]
 
-    # launchers, keeping their releases/ subfolder structure (_alternatives/ etc.)
+    # launchers: db_operator.py opens every .mgl/.mra from the checkout, so they must be
+    # committed in this repo. Copied byte-for-byte, keeping releases/ subfolders (_alternatives/ etc.)
+    dest_root = os.path.join(REPO, ROOT, f'_{category}')
+    wanted = set()
     for p in sorted(files):
         if p.lower().endswith(LAUNCHER_EXTS):
-            rows.append([f'{ROOT}/_{category}/{p[len("releases/"):]}', url(p), '', '', ''])
+            dest = os.path.join(dest_root, p[len('releases/'):])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with urllib.request.urlopen(url(p)) as r, open(dest, 'wb') as f:
+                f.write(r.read())
+            wanted.add(dest)
 
-    print(f'{full} @ {sha[:10]}: {core}_{date}.rbf + {len(rows) - 1} launchers', file=sys.stderr)
+    # drop launchers that are no longer in the core's releases/
+    for dirpath, _, names in os.walk(dest_root):
+        for n in names:
+            path = os.path.join(dirpath, n)
+            if n.lower().endswith(LAUNCHER_EXTS) and path not in wanted:
+                os.remove(path)
+                print(f'removed stale {path}', file=sys.stderr)
+
+    print(f'{full} @ {sha[:10]}: {os.path.basename(rbf_path)} + {len(wanted)} launchers', file=sys.stderr)
     return rows
 
 
 def main():
-    out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'external_files.csv')
+    out = os.path.join(REPO, 'external_files.csv')
     rows = []
-    for repo, category, launcher in CORES:
-        rows += rows_for_core(repo, category, launcher)
+    for repo, category in CORES:
+        rows += rows_for_core(repo, category)
     with open(out, 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(HEADER)
