@@ -6,14 +6,32 @@ on:
       - main
   workflow_dispatch:
 
-permissions: write-all
+permissions:
+  contents: write
 
 jobs:
   build_db:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Build Custom Database for MiSTer Downloader
-      run: set -o pipefail && curl --fail --location https://raw.githubusercontent.com/theypsilon/Downloader_DB-Template_MiSTer/main/.github/build_db.py | python3 -
+    - uses: actions/checkout@v4
+
+    # Every file is referenced by URL into its core repo (see .github/gen_external_files.py)
+    - name: Build db.json.zip
+      run: python3 .github/gen_external_files.py "$RUNNER_TEMP/out/db.json.zip"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Same db branch + drop-in ini the template published, so existing installs keep working
+    - name: Publish to db branch
+      run: |
+        set -e
+        cd "$RUNNER_TEMP/out"
+        printf '[RodimusFVC/Rodimus_MiSTer_DB]\ndb_url = https://raw.githubusercontent.com/RodimusFVC/Rodimus_MiSTer_DB/db/db.json.zip\n' > downloader_RodimusFVC_Rodimus_MiSTer_DB.ini
+        zip -q downloader_RodimusFVC_Rodimus_MiSTer_DB.zip downloader_RodimusFVC_Rodimus_MiSTer_DB.ini
+        git init -q -b db
+        git add db.json.zip downloader_RodimusFVC_Rodimus_MiSTer_DB.ini downloader_RodimusFVC_Rodimus_MiSTer_DB.zip
+        git -c user.name='github-actions[bot]' -c user.email='github-actions[bot]@users.noreply.github.com' commit -q -m 'Creating database'
+        git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" db
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-"""Generate external_files.csv for the Rodimus MiSTer custom database.
+"""Build db.json.zip for the Rodimus MiSTer custom database.
 
-Reads each core repo's PUSHED releases/ folder via the GitHub API (not local disk),
-pinned to the current commit SHA.
-  - latest rbf  -> external_files.csv row (size/MD5 left blank; the DB CI fills them in)
-  - .mgl/.mra   -> copied unchanged into this repo (the DB build reads them from the checkout)
+Every file is referenced by URL straight into its core repo: nothing is copied into this repo.
+Reads each core repo's PUSHED releases/ folder via the GitHub API, pinned to the current
+commit SHA, downloads each file only to compute its MD5 and size, and writes the database
+per docs/custom-databases.md of Downloader_MiSTer.
 
 Layout on the MiSTer:
     _RodimusCores/_<Category>/<launchers, subfolders>
     _RodimusCores/_<Category>/cores/<rbf>
 
-Usage: python3 .github/gen_external_files.py
+Usage: python3 .github/gen_external_files.py <output db.json.zip>
 """
-import csv
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 OWNER = 'RodimusFVC'
 ROOT = '_RodimusCores'
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_ID = 'RodimusFVC/Rodimus_MiSTer_DB'   # already published: never change
 
 # repo, category (deploy subfolder without '_')
 CORES = [
@@ -30,10 +33,7 @@ CORES = [
 ]
 
 LAUNCHER_EXTS = ('.mgl', '.mra')
-RBF_RE = re.compile(r'^(?:(?P<prefix>[A-Za-z0-9]+)-)?(?P<core>.+)_(?P<date>\d{8})\.rbf$')
-
-HEADER = ['Path in MiSTer', 'URL', 'Size in bytes (optional but recommended)',
-          'MD5 Hash (optional but recommended)', 'Filter Terms (optional)']
+RBF_RE = re.compile(r'^.+_(?P<date>\d{8})\.rbf$')
 
 
 def api(path):
@@ -46,7 +46,8 @@ def api(path):
         return json.load(r)
 
 
-def rows_for_core(repo, category):
+def entries_for_core(repo, category):
+    """Returns [(path on MiSTer, url)] for the latest rbf and every launcher in releases/."""
     full = f'{OWNER}/{repo}'
     branch = api(f'/repos/{full}')['default_branch']
     sha = api(f'/repos/{full}/commits/{branch}')['sha']
@@ -60,51 +61,57 @@ def rows_for_core(repo, category):
     def url(path):
         return f'https://raw.githubusercontent.com/{full}/{sha}/{urllib.parse.quote(path)}'
 
-    # latest rbf only, filename unchanged -> external_files.csv row
-    rbfs = []
-    for p in files:
-        m = RBF_RE.match(p[len('releases/'):])
-        if m:
-            rbfs.append((m.group('date'), p))
+    rbfs = [(m.group('date'), p) for p in files
+            if (m := RBF_RE.match(p[len('releases/'):]))]
     if not rbfs:
         sys.exit(f'{full}: no <Core>_yyyymmdd.rbf in releases/')
     _, rbf_path = max(rbfs)
-    rows = [[f'{ROOT}/_{category}/cores/{os.path.basename(rbf_path)}', url(rbf_path), '', '', '']]
+    entries = [(f'{ROOT}/_{category}/cores/{os.path.basename(rbf_path)}', url(rbf_path))]
 
-    # launchers: db_operator.py opens every .mgl/.mra from the checkout, so they must be
-    # committed in this repo. Copied byte-for-byte, keeping releases/ subfolders (_alternatives/ etc.)
-    dest_root = os.path.join(REPO, ROOT, f'_{category}')
-    wanted = set()
-    for p in sorted(files):
-        if p.lower().endswith(LAUNCHER_EXTS):
-            dest = os.path.join(dest_root, p[len('releases/'):])
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with urllib.request.urlopen(url(p)) as r, open(dest, 'wb') as f:
-                f.write(r.read())
-            wanted.add(dest)
+    launchers = [p for p in sorted(files) if p.lower().endswith(LAUNCHER_EXTS)]
+    entries += [(f'{ROOT}/_{category}/{p[len("releases/"):]}', url(p)) for p in launchers]
 
-    # drop launchers that are no longer in the core's releases/
-    for dirpath, _, names in os.walk(dest_root):
-        for n in names:
-            path = os.path.join(dirpath, n)
-            if n.lower().endswith(LAUNCHER_EXTS) and path not in wanted:
-                os.remove(path)
-                print(f'removed stale {path}', file=sys.stderr)
+    print(f'{full} @ {sha[:10]}: {os.path.basename(rbf_path)} + {len(launchers)} launchers', file=sys.stderr)
+    return entries
 
-    print(f'{full} @ {sha[:10]}: {os.path.basename(rbf_path)} + {len(wanted)} launchers', file=sys.stderr)
-    return rows
+
+def describe(entry):
+    path, url = entry
+    with urllib.request.urlopen(url) as r:
+        data = r.read()
+    return path, {'hash': hashlib.md5(data).hexdigest(), 'size': len(data), 'url': url}
 
 
 def main():
-    out = os.path.join(REPO, 'external_files.csv')
-    rows = []
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    out = sys.argv[1]
+
+    entries = []
     for repo, category in CORES:
-        rows += rows_for_core(repo, category)
-    with open(out, 'w', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(HEADER)
-        w.writerows(rows)
-    print(f'wrote {len(rows)} rows -> {out}', file=sys.stderr)
+        entries += entries_for_core(repo, category)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        files = dict(pool.map(describe, entries))
+
+    folders = {}
+    for path in files:
+        parent = os.path.dirname(path)
+        while parent:
+            folders[parent] = {}
+            parent = os.path.dirname(parent)
+
+    db = {
+        'v': 1,
+        'db_id': DB_ID,
+        'timestamp': int(time.time()),
+        'files': dict(sorted(files.items())),
+        'folders': dict(sorted(folders.items())),
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('db.json', json.dumps(db, indent=2))
+    print(f'wrote {len(files)} files, {len(folders)} folders -> {out}', file=sys.stderr)
 
 
 if __name__ == '__main__':
