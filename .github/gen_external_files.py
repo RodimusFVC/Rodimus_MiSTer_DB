@@ -8,7 +8,9 @@ per docs/custom-databases.md of Downloader_MiSTer.
 
 Layout on the MiSTer:
     _RodimusCores/_<Category>/<launchers, subfolders>
-    _RodimusCores/_<Category>/cores/<rbf>
+    _RodimusCores/cores/<rbf>                  (MRA repos)
+    _RodimusCores/_<Category>/cores/<rbf>      (MGL-only repos)
+    rbf installed without its <Category>- prefix
 
 Usage: python3 .github/gen_external_files.py <output db.json.zip>
 """
@@ -31,10 +33,37 @@ DB_ID = 'RodimusFVC/Rodimus_MiSTer_DB'   # already published: never change
 CORES = [
     ('InteractiveFiction-Frotz_MiSTer', 'InteractiveFiction'),
     ('VCR_Robots', 'VCR'),
+    ('Arcade-Arabian_MiSTer', 'Arcade'),
+    ('Arcade-BluePrint_MiSTer', 'Arcade'),
+    ('Arcade-Centipede_MiSTer', 'Arcade'),
+    ('Arcade-ChampionBaseball_MiSTer', 'Arcade'),
+    ('Arcade-CrazyClimber_MiSTer', 'Arcade'),
+    ('Arcade-DECOCassette_MiSTer', 'Arcade'),
+    ('Arcade-Exidy_MiSTer', 'Arcade'),
+    ('Arcade-Galaga_MiSTer', 'Arcade'),
+    ('Arcade-Galaxian_MiSTer', 'Arcade'),
+    ('Arcade-Gottlieb_MiSTer', 'Arcade'),
+    ('Arcade-Kangaroo_MiSTer', 'Arcade'),
+    ('Arcade-Konami82_MiSTer', 'Arcade'),
+    ('Arcade-Kyugo_MiSTer', 'Arcade'),
+    ('Arcade-LaserdiscGames_MiSTer', 'Arcade'),
+    ('Arcade-Nintendo_MiSTer', 'Arcade'),
+    ('Arcade-Pacman_MiSTer', 'Arcade'),
+    ('Arcade-PolePosition_MiSTer', 'Arcade'),
+    ('Arcade-Qix_MiSTer', 'Arcade'),
+    ('Arcade-SegaG80_MiSTer', 'Arcade'),
+    ('Arcade-SegaSystem1-2_MiSTer', 'Arcade'),
+    ('Arcade-SNK6502_MiSTer', 'Arcade'),
+    ('Arcade-SpaceInvaders_MiSTer', 'Arcade'),
+    ('Arcade-Universal_MiSTer', 'Arcade'),
+    ('Arcade-UPLFramebuffer_MiSTer', 'Arcade'),
+    ('Arcade-Vastar_MiSTer', 'Arcade'),
+    ('Arcade-Williams_MiSTer', 'Arcade'),
 ]
 
 LAUNCHER_EXTS = ('.mgl', '.mra')
-RBF_RE = re.compile(r'^.+_(?P<date>\d{8})\.rbf$')
+# newest <Core>_yyyymmdd.rbf; cores still in development ship <Core>_TestBuild.rbf instead
+RBF_RE = re.compile(r'^.+_(?P<date>\d{8}|TestBuild)\.rbf$')
 
 
 def api(path):
@@ -50,8 +79,7 @@ def api(path):
 def entries_for_core(repo, category):
     """Returns [(path on MiSTer, url)] for the latest rbf and every launcher in releases/."""
     full = f'{OWNER}/{repo}'
-    branch = api(f'/repos/{full}')['default_branch']
-    sha = api(f'/repos/{full}/commits/{branch}')['sha']
+    sha = api(f'/repos/{full}/commits/HEAD')['sha']   # HEAD = default branch
     tree = api(f'/repos/{full}/git/trees/{sha}?recursive=1')
     if tree.get('truncated'):
         sys.exit(f'{full}: git tree truncated, cannot list releases/ reliably')
@@ -64,15 +92,24 @@ def entries_for_core(repo, category):
 
     rbfs = [(m.group('date'), p) for p in files
             if (m := RBF_RE.match(p[len('releases/'):]))]
+    dated = [r for r in rbfs if r[0] != 'TestBuild']
     if not rbfs:
-        sys.exit(f'{full}: no <Core>_yyyymmdd.rbf in releases/')
-    _, rbf_path = max(rbfs)
-    entries = [(f'{ROOT}/_{category}/cores/{os.path.basename(rbf_path)}', url(rbf_path))]
+        sys.exit(f'{full}: no <Core>_yyyymmdd.rbf or <Core>_TestBuild.rbf in releases/')
+    _, rbf_path = max(dated) if dated else rbfs[0]
 
     launchers = [p for p in sorted(files) if p.lower().endswith(LAUNCHER_EXTS)]
+
+    # installed name drops the <Category>- prefix: InteractiveFiction-Frotz_20261022.rbf -> Frotz_20261022.rbf
+    rbf_name = os.path.basename(rbf_path)
+    if rbf_name.startswith(f'{category}-'):
+        rbf_name = rbf_name[len(category) + 1:]
+    # Main_MiSTer resolves an MRA's rbf in <first _Folder>/cores = _RodimusCores/cores (HW-confirmed with VCR)
+    uses_mra = any(p.lower().endswith('.mra') for p in launchers)
+    cores_dir = f'{ROOT}/cores' if uses_mra else f'{ROOT}/_{category}/cores'
+    entries = [(f'{cores_dir}/{rbf_name}', url(rbf_path))]
     entries += [(f'{ROOT}/_{category}/{p[len("releases/"):]}', url(p)) for p in launchers]
 
-    print(f'{full} @ {sha[:10]}: {os.path.basename(rbf_path)} + {len(launchers)} launchers', file=sys.stderr)
+    print(f'{full} @ {sha[:10]}: {cores_dir}/{rbf_name} + {len(launchers)} launchers', file=sys.stderr)
     return entries
 
 
@@ -91,6 +128,13 @@ def main():
     entries = []
     for repo, category in CORES:
         entries += entries_for_core(repo, category)
+
+    # several repos share _RodimusCores/_Arcade/: a path clash would silently drop a file
+    seen = {}
+    for path, url in entries:
+        if path.lower() in seen:
+            sys.exit(f'path clash: {path}\n  {seen[path.lower()]}\n  {url}')
+        seen[path.lower()] = url
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         files = dict(pool.map(describe, entries))
