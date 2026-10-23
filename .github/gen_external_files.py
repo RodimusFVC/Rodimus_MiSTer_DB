@@ -34,6 +34,7 @@ CORES = [
     ('InteractiveFiction-Frotz_MiSTer', 'InteractiveFiction'),
     ('VCR_Robots', 'VCR'),
     ('Arcade-Arabian_MiSTer', 'Arcade'),
+    ('Arcade-BallyMidwayMCR_MiSTer', 'Arcade'),
     ('Arcade-BluePrint_MiSTer', 'Arcade'),
     ('Arcade-Centipede_MiSTer', 'Arcade'),
     ('Arcade-ChampionBaseball_MiSTer', 'Arcade'),
