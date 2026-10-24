@@ -50,6 +50,7 @@ CORES = [
     ('Arcade-LaserdiscGames_MiSTer', 'Arcade'),
     ('Arcade-Nintendo_MiSTer', 'Arcade'),
     ('Arcade-Pacman_MiSTer', 'Arcade'),
+    ('Arcade-Phoenix_MiSTer', 'Arcade'),
     ('Arcade-PolePosition_MiSTer', 'Arcade'),
     ('Arcade-Qix_MiSTer', 'Arcade'),
     ('Arcade-SegaG80_MiSTer', 'Arcade'),
