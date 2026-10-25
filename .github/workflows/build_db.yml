@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    # checkout@v5 runs on Node 24 (v4 = Node 20, deprecated on GitHub runners)
+    - uses: actions/checkout@v5
 
     # Every file is referenced by URL into its core repo (see .github/gen_external_files.py)
     - name: Build db.json.zip
