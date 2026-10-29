@@ -54,6 +54,8 @@ CORES = [
     ('Arcade-Pacman_MiSTer', 'Arcade'),
     ('Arcade-Phoenix_MiSTer', 'Arcade'),
     ('Arcade-PolePosition_MiSTer', 'Arcade'),
+    ('Arcade-Pong_MiSTer', 'Arcade'),
+    ('Arcade-PunchOut_MiSTer', 'Arcade'),
     ('Arcade-Qix_MiSTer', 'Arcade'),
     ('Arcade-SegaG80_MiSTer', 'Arcade'),
     ('Arcade-SegaSystem1-2_MiSTer', 'Arcade'),
