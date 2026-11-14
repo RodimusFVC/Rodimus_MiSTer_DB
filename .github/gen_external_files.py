@@ -59,6 +59,7 @@ CORES = [
     ('Arcade-Qix_MiSTer', 'Arcade'),
     ('Arcade-SegaG80_MiSTer', 'Arcade'),
     ('Arcade-SegaSystem1-2_MiSTer', 'Arcade'),
+    ('Arcade-SegaVICDual_MiSTer', 'Arcade'),
     ('Arcade-SNK6502_MiSTer', 'Arcade'),
     ('Arcade-SpaceInvaders_MiSTer', 'Arcade'),
     ('Arcade-Universal_MiSTer', 'Arcade'),
